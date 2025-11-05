@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CaricatureGS</title>
+  <meta name="description" content="Project page for CaricatureGS — curvature-aware 3D Gaussian Splatting for photorealistic facial caricatures. Videos, comparisons, pipeline, BibTeX." />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <style>
+  /* ---- Shared comparison (image) ---- */
+  .cmp-wrap{ width:100%; }
+  .cmp{
+    position:relative; width:100%; overflow:hidden; background:#fff;
+    user-select:none; touch-action:none; border-radius:0.75rem;
+  }
+  .cmp .layer{ position:absolute; inset:0; overflow:hidden; }
+  .cmp img{ position:absolute; inset:0; width:100%; height:100%; object-fit:contain; display:block; }
+  .cmp .cmp-handle{
+    position:absolute; top:0; bottom:0; left:50%;
+    width:2px; background:rgba(0,0,0,.9); cursor:ew-resize; z-index:3;
+  }
+  .cmp .cmp-handle::before{
+    content:""; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:28px; height:28px; border-radius:9999px; background:#fff; border:1px solid rgba(0,0,0,.2);
+    box-shadow:0 2px 8px rgba(0,0,0,.15);
+  }
+
+  /* ---- Video cards (single) ---- */
+  .video-thumb{
+    position: relative; width: 100%; aspect-ratio: 16 / 9;
+    overflow: hidden; background:#fff; /* white, not black */
+  }
+  .video-thumb > video{
+    position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:#fff;
+    display:block;
+  }
+
+  /* ---- Video comparison (two videos + slider) ---- */
+  .vidcmp-wrap{ position:relative; width:100%; overflow:hidden; background:#fff; }
+  .vidcmp{ position:relative; width:100%; height:100%; border-radius:0.75rem; overflow:hidden; }
+  .vid-layer{ position:absolute; inset:0; }
+  .vid-layer.top{ z-index:2; pointer-events:none; } /* allow clicks to base */
+  .vidcmp video{ width:100%; height:100%; object-fit:contain; background:#fff; display:block; }
+
+  .vid-handle{
+    position:absolute; top:0; bottom:0; left:50%;
+    width:2px; background:rgba(0,0,0,.9); cursor:ew-resize; z-index:4;
+  }
+  .vid-handle::before{
+    content:""; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:28px; height:28px; border-radius:9999px; background:#fff; border:1px solid rgba(0,0,0,.2); box-shadow:0 2px 8px rgba(0,0,0,.2);
+  }
+
+  /* Hide the round knob on video sliders (keep the thin line + drag) */
+  #videos .vid-handle::before { content: none; }
+  
+  #videos .vid-handle::after{
+    content:"";
+    position:absolute; top:0; bottom:0; left:50%;
+    width:24px; transform:translateX(-50%);
+    /* invisible hit area so the thin line is still easy to grab */
+  }
+    
+  /* ---- Click-to-play overlay (used for single and comparison) ---- */
+  .click-layer{ position:absolute; inset:0; z-index:3; cursor:pointer; display:block; background:transparent; }
+  .click-layer .glyph{
+    width:56px; height:56px; border-radius:9999px; background:rgba(255,255,255,.95);
+    box-shadow:0 2px 8px rgba(0,0,0,.35); display:grid; place-items:center;
+    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); opacity:.95; transition:opacity .15s; pointer-events:none;
+  }
+  .is-playing .click-layer .glyph{ opacity:0; }
+
+  /* Subject selector (for Results image comparison) */
+  .subject-nav{ display:flex; flex-direction:column; gap:.5rem; max-height:420px; overflow:auto; padding-right:4px; }
+  .subject-nav::-webkit-scrollbar{ width:8px; }
+  .subject-nav::-webkit-scrollbar-thumb{ background:rgba(15,23,42,.15); border-radius:9999px; }
+  .subject-nav:hover::-webkit-scrollbar-thumb{ background:rgba(15,23,42,.3); }
+  .subj-btn{
+    display:inline-flex; align-items:center; gap:.5rem; width:100%; padding:.5rem .75rem;
+    border:1px solid #e5e7eb; border-radius:12px; background:#fff; color:#0f172a; font-size:14px; line-height:1.4;
+    box-shadow:0 1px 2px rgba(0,0,0,.04); transition:transform .15s, box-shadow .15s, background .15s, border-color .15s;
+  }
+  .subj-btn:hover{ transform:translateY(-1px); box-shadow:0 6px 14px rgba(0,0,0,.08); background:#f8fafc; }
+  .subj-btn:focus-visible{ outline:2px solid #3b82f6; outline-offset:2px; }
+  .subj-btn[aria-pressed="true"]{ background:#0f172a; color:#fff; border-color:#0f172a; box-shadow:0 8px 18px rgba(15,23,42,.25); }
+  .subj-chip{
+    display:inline-flex; align-items:center; justify-content:center; min-width:1.75rem; height:1.5rem; padding:0 .5rem;
+    border-radius:9999px; background:#f1f5f9; color:#334155; font-weight:600; font-size:12px;
+  }
+  .subj-btn[aria-pressed="true"] .subj-chip{ background:#fff; color:#0f172a; }
+
+
+  /* Compact subject pills just for the Results section */
+  #results .subject-nav{
+    display: flex;
+    flex-direction: column;   /* keep one per line; switch to row + wrap if you want a grid */
+    gap: .4rem;
+  }
+  #results .subject-nav .subj-btn{
+    width: auto;              /* ⬅️ key: no full width */
+    align-self: flex-start;   /* shrink to content, not container */
+    padding: .25rem .5rem;    /* tighter */
+    border-radius: 9999px;    /* pill look */
+    box-shadow: none;         /* optional: flatter */
+  }
+  #results .subject-nav .subj-chip{
+    min-width: auto;          /* let the chip fit the number */
+    height: 1.5rem;
+    padding: 0 .5rem;
+  }
+  /* keep selected state */
+  #results .subject-nav .subj-btn[aria-pressed="true"]{
+    background:#0f172a; color:#fff; border-color:#0f172a;
+  }
+  #results .subject-nav .subj-btn[aria-pressed="true"] .subj-chip{
+    background:#fff; color:#0f172a;
+  }    
+  </style>
+</head>
+
+<body class="bg-white text-slate-800 [font-family:Inter,sans-serif]">
+  <!-- Header -->
+  <header class="hero-grad sticky top-0 z-50 backdrop-blur bg-white/80 border-b border-slate-200">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between">
+      <a href="#top" class="font-extrabold tracking-tight text-xl">CaricatureGS</a>
+      <nav class="hidden md:flex gap-6 text-sm font-medium text-slate-600">
+        <a href="#abstract" class="hover:text-slate-900">Abstract</a>
+        <a href="#pipeline" class="hover:text-slate-900">Pipeline</a>
+        <a href="#results" class="hover:text-slate-900">Results</a>
+        <a href="#videos" class="hover:text-slate-900">Videos</a>
+        <a href="#bibtex" class="hover:text-slate-900">BibTeX</a>
+        <a href="#code" class="hover:text-slate-900">Code</a>
+      </nav>
+      <a href="#code" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 text-white text-sm shadow-soft">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12a11.5 11.5 0 0 0 7.85 10.93c.58.1.8-.25.8-.56v-2.17c-3.2.7-3.87-1.54-3.87-1.54-.53-1.34-1.29-1.7-1.29-1.7-1.06-.73.08-.72.08-.72 1.18.08 1.8 1.22 1.8 1.22 1.04 1.78 2.73 1.27 3.4.97.1-.75.41-1.27.75-1.56-2.55-.29-5.23-1.28-5.23-5.7 0-1.26.45-2.3 1.2-3.11-.12-.29-.52-1.47.12-3.07 0 0 .97-.31 3.18 1.19a11.02 11.02 0 0 1 5.8 0c 2.2-1.5 3.17-1.19 3.17-1.19.64 1.6.24 2.78.12 3.07.75.81 1.2 1.85 1.2 3.11 0 4.43-2.68 5.4-5.24 5.69.42.37.8 1.11.8 2.26v3.35c0 .31.21.67.81.56A11.5 11.5 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </header>
+
+  <!-- Hero -->
+  <section id="top" class="pt-12 pb-8">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="grid lg:grid-cols-2 gap-10 items-center">
+        <div>
+          <h1 class="text-4xl sm:text-5xl font-extrabold tracking-tight leading-tight">CaricatureGS:<br><span class="text-slate-500">Exaggerating 3D Gaussian Splatting Faces with Gaussian Curvature</span></h1>
+          <p class="lead mt-5 text-slate-600">Photorealistic facial exaggeration by coupling curvature-weighted mesh deformation with anisotropic 3D Gaussian Splatting. Real-time view synthesis, controllable exaggeration, and faithful identity preservation.</p>
+          <div class="mt-6 flex flex-wrap gap-3">
+            <a href="#paper" class="px-4 py-2 rounded-xl bg-blue-600 text-white shadow-soft">Paper (PDF)</a>
+            <a href="#code" class="px-4 py-2 rounded-xl bg-slate-900 text-white shadow-soft">Code</a>
+            <a href="#bibtex" class="px-4 py-2 rounded-xl bg-slate-100 text-slate-900">BibTeX</a>
+          </div>
+          <ul class="mt-6 text-sm text-slate-500 space-y-1">
+            <li><strong>Authors:</strong> Matmon Eldad, Bracha Amit, Rotstein Noam, Kimmel Ron</li>
+            <li><strong>Venue:</strong> 3DV 2026 (submitted)</li>
+            <li><strong>Codebase:</strong> Built atop <a href="https://github.com/SurFhead2025/SurFhead/tree/main" class="text-blue-600 underline">SurFHead</a> (with extensive additions)</li>
+          </ul>
+        </div>
+        <div>
+          <div class="rounded-2xl overflow-hidden shadow-soft">
+            <img
+              src="assets/teaser_poster.jpg"
+              alt="CaricatureGS teaser"
+              class="w-full h-auto"
+              decoding="async"
+              loading="eager"
+            />
+          </div>
+        </div>       
+      </div>
+    </div>
+  </section>
+
+<!-- Abstract -->
+<section id="abstract" class="py-12 bg-slate-50">
+  <!-- match other sections -->
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <!-- optional: limit text width but keep it left-aligned -->
+    <div class="max-w-3xl">
+      <h2 class="text-2xl font-bold">Abstract</h2>
+      <p class="mt-4 text-slate-700">
+        We present <em>CaricatureGS</em>, a curvature-aware 3D Gaussian Splatting framework for photorealistic facial caricature. Our method couples a curvature-weighted Poisson deformation on a fitted FLAME mesh with anisotropic 3D Gaussians. We introduce a local affine transfer (LAT) to synthesize pseudo ground-truth for exaggerated views and a joint optimization training scheme across original and caricatured frames. The result is a single 3DGS model that renders identity-faithful faces under controllable exaggeration and novel views at interactive rates.
+      </p>
+    </div>
+  </div>
+</section>
+
+  <!-- Pipeline -->
+  <section id="pipeline" class="py-12 bg-white-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <h2 class="text-2xl font-bold">Method & Pipeline</h2>
+      <div class="mt-6">
+        <img src="assets/figures/pipeline_v6.jpg" alt="Pipeline diagram" class="w-full h-auto rounded-2xl shadow-soft" />
+      </div>
+      <div class="mt-10">
+        <ol class="grid sm:grid-cols-2 xl:grid-cols-3 gap-6">
+          <li class="group relative rounded-2xl border bg-white p-5 shadow-soft hover:-translate-y-0.5 transition">
+            <div class="flex items-start gap-3">
+              <span class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-600 text-white font-semibold">1</span>
+              <div>
+                <h3 class="font-semibold">Fit FLAME & compute curvature</h3>
+                <p class="mt-1.5 text-sm text-slate-600">Given an input videos we fit per-frame FLAME mesh and estimate Gaussian curvature <span class="font-mono">K</span> on it. We exaggerate the shape geometry by solving a Poisson equation weighted by <span class="font-mono">K</span>.</p>
+                <div class="mt-2 flex flex-wrap gap-2">
+                  <span class="px-2 py-0.5 rounded-md text-xs bg-fuchsia-50 text-fuchsia-700">FLAME</span>
+                  <span class="px-2 py-0.5 rounded-md text-xs bg-fuchsia-50 text-fuchsia-700">Curvature K</span>
+                </div>
+              </div>
+            </div>
+          </li>
+          <li class="group relative rounded-2xl border bg-white p-5 shadow-soft hover:-translate-y-0.5 transition">
+            <div class="flex items-start gap-3">
+              <span class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white font-semibold">2</span>
+              <div>
+                <h3 class="font-semibold">Curvature-weighted deformation</h3>
+                <p class="mt-1.5 text-sm text-slate-600">Local Affine Transfer (LAT) warps original frames to the exaggerated projections, yielding supervision for the Gaussians optimization.</p>
+                <div class="mt-2 flex flex-wrap gap-2">
+                  <span class="px-2 py-0.5 rounded-md text-xs bg-fuchsia-50 text-fuchsia-700">self-supervision</span>
+                </div>
+              </div>
+            </div>
+          </li>
+          <li class="group relative rounded-2xl border bg-white p-5 shadow-soft hover:-translate-y-0.5 transition">
+            <div class="flex items-start gap-3">
+              <span class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-orange-600 text-white font-semibold">3</span>
+              <div>
+                <h3 class="font-semibold">LAT pseudo-ground-truth</h3>
+                <p class="mt-1.5 text-sm text-slate-600">Jointly optimize one set of anisotropic 3D Gaussians on original + caricatured frames for consistent geometry & radiance. Alternating between GT and GT* images allows for smooth interpolation between representations.</p>
+              </div>
+            </div>
+          </li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+
+<!-- Video Gallery -->
+<section id="videos" class="py-12 bg-slate-50">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <h2 class="text-2xl font-bold mb-6">Video Gallery</h2>
+
+    <!-- Row 1: exactly 3 comparison cards -->
+    <div class="grid sm:grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+
+      <!-- 306 -->
+      <figure class="rounded-2xl overflow-hidden border bg-white shadow-soft">
+        <div class="vidcmp-wrap h-72 md:h-80 lg:h-72 xl:h-80">
+          <div class="vidcmp">
+            <div class="vid-layer base">
+              <!-- Base = Baseline/SurFHead -->
+              <video autoplay muted loop playsinline preload="auto" data-autoposter
+                     poster="assets/thumbnails/interp_gamma.jpg">
+                <source src="assets/videos/interpolate_306_surfhead_.mp4" type="video/mp4" />
+              </video>
+            </div>
+            <div class="vid-layer top">
+              <!-- Top = Ours (muted) -->
+              <video autoplay muted loop playsinline preload="auto" data-autoposter>
+                <source src="assets/videos/interpolate_306_ours_.mp4" type="video/mp4" />
+              </video>
+            </div>
+            <div class="vid-handle"></div>
+          </div>
+        </div>
+        <figcaption class="p-3 text-sm">
+            <div class="mt-2 flex items-center justify-between text-sm">
+              <span class="rounded-md bg-black/65 px-2 py-1 font-medium text-white">Ours</span>
+              <span class="text-slate-600">(γ = 0 → 0.20)</span>
+              <span class="rounded-md bg-black/65 px-2 py-1 font-medium text-white">SurFHead</span>
+            </div>
+        </figcaption>
+      </figure>
+
+      <!-- 304 -->
+      <figure class="rounded-2xl overflow-hidden border bg-white shadow-soft">
+        <div class="vidcmp-wrap h-72 md:h-80 lg:h-72 xl:h-80">
+          <div class="vidcmp">
+            <div class="vid-layer base">
+              <video autoplay muted loop playsinline preload="auto" data-autoposter
+                     poster="assets/thumbnails/interp_gamma.jpg">
+                <source src="assets/videos/interpolate_304_surfhead_.mp4" type="video/mp4" />
+              </video>
+            </div>
+            <div class="vid-layer top">
+              <video autoplay muted loop playsinline preload="auto" data-autoposter>
+                <source src="assets/videos/interpolate_304_ours_.mp4" type="video/mp4" />
+              </video>
+            </div>
+            <div class="vid-handle"></div>
+          </div>
+        </div>
+        <figcaption class="p-3 text-sm">
+            <div class="mt-2 flex items-center justify-between text-sm">
+              <span class="rounded-md bg-black/65 px-2 py-1 font-medium text-white">Ours</span>
+              <span class="text-slate-600">(γ = 0 → 0.20)</span>
+              <span class="rounded-md bg-black/65 px-2 py-1 font-medium text-white">SurFHead</span>
+            </div>
+        </figcaption>
+      </figure>
+
+      <!-- 460 -->
+      <figure class="rounded-2xl overflow-hidden border bg-white shadow-soft">
+        <div class="vidcmp-wrap h-72 md:h-80 lg:h-72 xl:h-80">
+          <div class="vidcmp">
+            <div class="vid-layer base">
+              <video autoplay muted loop playsinline preload="auto" data-autoposter
+                     poster="assets/thumbnails/interp_gamma.jpg">
+                <source src="assets/videos/interpolate_460_surfhead_.mp4" type="video/mp4" />
+              </video>
+            </div>
+            <div class="vid-layer top">
+              <video autoplay muted loop playsinline preload="auto" data-autoposter>
+                <source src="assets/videos/interpolate_460_ours_.mp4" type="video/mp4" />
+              </video>
+            </div>
+            <div class="vid-handle"></div>
+          </div>
+        </div>
+        <figcaption class="p-3 text-sm">
+            <div class="mt-2 flex items-center justify-between text-sm">
+              <span class="rounded-md bg-black/65 px-2 py-1 font-medium text-white">Ours</span>
+              <span class="text-slate-600">(γ = 0 → 0.20)</span>
+              <span class="rounded-md bg-black/65 px-2 py-1 font-medium text-white">SurFHead</span>
+            </div>
+        </figcaption>
+      </figure>
+
+    </div>
+
+    <!-- Row 2: exactly 3 single videos -->
+    <div class="grid sm:grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- 306 -->
+      <figure class="rounded-2xl overflow-hidden border bg-white shadow-soft">
+        <div class="video-thumb h-72 md:h-80 lg:h-72 xl:h-80 bg-white">
+          <video autoplay muted loop playsinline preload="auto" data-autoposter>
+            <source src="assets/videos/interpolate_nose_306.mp4" type="video/mp4" />
+          </video>
+        </div>
+        <figcaption class="p-3 text-sm">
+          <div class="text-slate-500">Semantic editing — nose</div>
+        </figcaption>
+      </figure>
+
+      <!-- 304 -->
+      <figure class="rounded-2xl overflow-hidden border bg-white shadow-soft">
+        <div class="video-thumb h-72 md:h-80 lg:h-72 xl:h-80 bg-white">
+          <video autoplay muted loop playsinline preload="auto" data-autoposter>
+            <source src="assets/videos/interpolate_nose_304.mp4" type="video/mp4" />
+          </video>
+        </div>
+        <figcaption class="p-3 text-sm">
+          <div class="text-slate-500">Semantic editing — nose</div>
+        </figcaption>
+      </figure>
+
+      <!-- 460 -->
+      <figure class="rounded-2xl overflow-hidden border bg-white shadow-soft">
+        <div class="video-thumb h-72 md:h-80 lg:h-72 xl:h-80 bg-white">
+          <video autoplay muted loop playsinline preload="auto" data-autoposter>
+            <source src="assets/videos/interpolate_nose_460.mp4" type="video/mp4" />
+          </video>
+        </div>
+        <figcaption class="p-3 text-sm">
+          <div class="text-slate-500">Semantic editing — nose</div>
+        </figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+
+<!-- Results (images) -->
+<section id="results" class="py-12">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <h2 class="text-2xl font-bold mb-6">Qualitative Results</h2>
+    <div class="grid lg:grid-cols-2 gap-12">
+      
+      <div class="p-8 rounded-2xl border shadow-soft bg-white">
+        <div class="cmp-wrap">
+          <div class="cmp" id="cmp1">
+            <div class="layer base">
+              <img src="assets/comparisons/original_interpolation.png" alt="SurfHead">
+            </div>
+            <div class="layer top">
+              <img src="assets/comparisons/ours_interpolation.png" alt="Ours">
+            </div>
+            <div class="cmp-handle"></div>
+            <!-- ❌ removed the in-image overlay labels -->
+          </div>
+        </div>
+      
+        <!-- ✅ new caption row with pill labels (replaces the old text row) -->
+        <div class="mt-2 flex items-center justify-between text-sm">
+          <span class="rounded-md bg-black/65 px-2 py-1 font-medium text-white">Ours</span>
+          <span class="text-slate-600">(γ = 0 → 0.20)</span>
+          <span class="rounded-md bg-black/65 px-2 py-1 font-medium text-white">SurfHead</span>
+        </div>
+      </div>
+
+      <div class="p-8 rounded-2xl border shadow-soft bg-white">
+        <div class="flex gap-6">
+          <div class="w-44">
+            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Subjects</div>
+            <nav class="subject-nav" aria-label="Subjects">
+              <button class="subj-btn" data-subj="subj_253" aria-pressed="false"><span class="subj-chip">253</span></button>
+              <button class="subj-btn" data-subj="subj_264" aria-pressed="false"><span class="subj-chip">264</span></button>
+              <button class="subj-btn" data-subj="subj_218" aria-pressed="true"><span class="subj-chip">218</span></button>
+              <button class="subj-btn" data-subj="subj_304" aria-pressed="false"><span class="subj-chip">304</span></button>
+            </nav>
+          </div>
+
+          <div class="cmp-wrap grow">
+            <div class="cmp relative" id="cmp2">
+              <div class="layer base"><img id="cmp2-base" src="assets/comparisons/218_surfhead.png" alt="Ours"></div>
+              <div class="layer top"><img id="cmp2-top" src="assets/comparisons/218_ours.png" alt="SurfHead"></div>
+              <div class="cmp-handle"></div>
+              <div class="pointer-events-none absolute inset-x-0 bottom-0 z-[2] flex justify-between p-2">
+                <span class="rounded-md bg-black/65 px-2 py-1 text-[13px] font-medium text-white">Ours</span>
+                <span class="rounded-md bg-black/65 px-2 py-1 text-[13px] font-medium text-white">SurfHead</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div> 
+
+    </div>
+  </div>
+</section>
+
+  <!-- Code & Data -->
+  <section id="code" class="py-12">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <h2 class="text-2xl font-bold">Code, Data &amp; Models</h2>
+      <ul class="mt-4 space-y-2 text-slate-700">
+        <li>GitHub: <a href="https://github.com/eldad929/caricatureGS" class="text-blue-600 underline">eldad929/caricatureGS</a></li>
+        <li>Pretrained models &amp; demos: <em>(add links)</em></li>
+        <li>Dataset: NeRSemble (EMO) — follow license; we provide configs only.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- BibTeX -->
+  <section id="bibtex" class="py-12 bg-slate-50">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+      <h2 class="text-2xl font-bold">BibTeX</h2>
+      <pre class="mt-4 p-4 bg-white rounded-xl border overflow-x-auto text-sm"><code>@article{Matmon2026CaricatureGS,
+  title   = {CaricatureGS: Gaussian-Curvature-Guided 3D Gaussian Splatting for Facial Caricature},
+  author  = {Matmon Eldad , Bracha Amit, Rotstein Noam, Kimmel Ron},
+  conference = {3DV},
+  year    = {2026},
+  note    = {submitted}
+}</code></pre>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="py-10 border-t">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-sm text-slate-500">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <p>© 2025 CaricatureGS authors. Built with vanilla HTML + Tailwind. Hosted on GitHub Pages.</p>
+        <div class="flex gap-4">
+          <a href="#top" class="underline">Back to top</a>
+          <a href="https://github.com/eldad929" class="underline">GitHub</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ===== Scripts (single, de-duplicated) ===== -->
+  <script>
+  /* -------- Image comparison slider for Results -------- */
+  function setupCmpBox(cmp){
+    const base = cmp.querySelector('.layer.base img');
+    const top  = cmp.querySelector('.layer.top img');
+    function initBox(){
+      if(!base.naturalWidth || !base.naturalHeight || !top.naturalWidth || !top.naturalHeight) return;
+      cmp.style.aspectRatio = base.naturalWidth + " / " + base.naturalHeight;
+      initSlider(cmp);
+    }
+    if(!base.complete) base.addEventListener('load', initBox, {once:true});
+    if(!top.complete)  top.addEventListener('load',  initBox, {once:true});
+    initBox();
+  }
+  function initSlider(cmp){
+    const topWrap = cmp.querySelector('.layer.top');
+    const handle  = cmp.querySelector('.cmp-handle');
+    function setClipAtX(xPx){
+      const W = cmp.clientWidth;
+      const x = Math.max(0, Math.min(xPx, W));
+      topWrap.style.clipPath = `inset(0 ${W - x}px 0 0)`;
+      handle.style.left = (x - 1) + 'px';
+    }
+    function onDrag(clientX){
+      const rect = cmp.getBoundingClientRect();
+      setClipAtX(Math.max(0, Math.min(clientX - rect.left, rect.width)));
+    }
+    let down=false;
+    handle.addEventListener('pointerdown', e=>{ down=true; handle.setPointerCapture(e.pointerId); });
+    window.addEventListener('pointerup',   ()=> down=false);
+    window.addEventListener('pointermove', e=>{ if(down) onDrag(e.clientX); });
+    window.addEventListener('resize', ()=> setClipAtX(cmp.clientWidth/2));
+    setClipAtX(cmp.clientWidth/2);
+  }
+  window.addEventListener('DOMContentLoaded', ()=> {
+    document.querySelectorAll('.cmp').forEach(setupCmpBox);
+  });
+
+  /* -------- Subject toggle (Results image comparison) -------- */
+  const SUBJECT_IMAGES = {
+    'subj_253': { base: 'assets/comparisons/253_surfhead.png', top: 'assets/comparisons/253_ours.png' },
+    'subj_264': { base: 'assets/comparisons/264_surfhead.png', top: 'assets/comparisons/264_ours.png' },
+    'subj_218': { base: 'assets/comparisons/218_surfhead.png', top: 'assets/comparisons/218_ours.png' },
+    'subj_304': { base: 'assets/comparisons/304_surfhead.png', top: 'assets/comparisons/304_ours.png' },
+  };
+  function reinitCmpAfterSwap(cmpEl) {
+    const base = cmpEl.querySelector('.layer.base img');
+    const top  = cmpEl.querySelector('.layer.top img');
+    const handle = cmpEl.querySelector('.cmp-handle');
+    const topWrap = cmpEl.querySelector('.layer.top');
+    function apply(){
+      if(!base.naturalWidth || !top.naturalWidth) return;
+      cmpEl.style.aspectRatio = base.naturalWidth + ' / ' + base.naturalHeight;
+      const W = cmpEl.clientWidth || base.naturalWidth;
+      const x = W/2;
+      topWrap.style.clipPath = `inset(0 ${W-x}px 0 0)`;
+      handle.style.left = (x-1) + 'px';
+    }
+    if(!base.complete) base.addEventListener('load', apply, {once:true});
+    if(!top.complete)  top.addEventListener('load',  apply, {once:true});
+    apply();
+  }
+  function initSubjectToggle(){
+    const cmp2    = document.getElementById('cmp2');
+    const baseImg = document.getElementById('cmp2-base');
+    const topImg  = document.getElementById('cmp2-top');
+    if(!cmp2 || !baseImg || !topImg) return;
+    const buttons = document.querySelectorAll('.subject-nav .subj-btn');
+    buttons.forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const subj = btn.getAttribute('data-subj');
+        const pair = SUBJECT_IMAGES[subj]; if(!pair) return;
+        buttons.forEach(b=>b.setAttribute('aria-pressed','false'));
+        btn.setAttribute('aria-pressed','true');
+        baseImg.src = pair.base + '?v=' + Date.now();
+        topImg.src  = pair.top  + '?v=' + Date.now();
+        reinitCmpAfterSwap(cmp2);
+      });
+    });
+  }
+  window.addEventListener('DOMContentLoaded', initSubjectToggle);
+  </script>
+  
+  <script>
+  /* -------- Helpers for video gallery -------- */
+/* ======= AUTOPLAY ENGINE (single + comparison) ======= */
+function tryPlay(v){ if (v) v.play().catch(()=>{}); }
+function ensureLoop(v){
+  if (!v) return;
+  v.loop = true;
+  v.addEventListener('ended', () => { v.currentTime = 0; tryPlay(v); });
+}
+
+/* Init a two-video comparison block (root = .vidcmp) */
+function initVideoSlider(root){
+  const topLayer = root.querySelector('.vid-layer.top');
+  const handle   = root.querySelector('.vid-handle');
+  const baseVid  = root.querySelector('.vid-layer.base video');
+  const topVid   = root.querySelector('.vid-layer.top  video');
+
+  // start mid split
+  function setAt(x){
+    const W = root.clientWidth;
+    const X = Math.max(0, Math.min(x, W));
+    topLayer.style.clipPath = `inset(0 ${W - X}px 0 0)`;
+    handle.style.left = (X - 1) + 'px';
+  }
+  setAt(root.clientWidth / 2);
+  window.addEventListener('resize', () => setAt(root.clientWidth / 2));
+
+  // drag
+  let down = false;
+  handle.addEventListener('pointerdown', e => { down = true; handle.setPointerCapture(e.pointerId); });
+  window.addEventListener('pointerup', () => down = false);
+  window.addEventListener('pointermove', e => {
+    if (!down) return;
+    const r = root.getBoundingClientRect();
+    setAt(Math.max(0, Math.min(e.clientX - r.left, r.width)));
+  });
+
+  // keep top in sync with base
+  const mirror = () => {
+    if (Math.abs(baseVid.currentTime - topVid.currentTime) > 0.05) topVid.currentTime = baseVid.currentTime;
+    if (topVid.playbackRate !== baseVid.playbackRate) topVid.playbackRate = baseVid.playbackRate;
+  };
+  baseVid.addEventListener('play', () => { tryPlay(topVid); mirror(); });
+  baseVid.addEventListener('pause', () => topVid.pause());
+  baseVid.addEventListener('timeupdate', mirror);
+  baseVid.addEventListener('ratechange', mirror);
+  topVid.addEventListener('seeking', mirror);
+
+  // make both truly loop forever
+  ensureLoop(baseVid);
+  ensureLoop(topVid);
+
+  // if autoplay was blocked at first, kick both when ready/visible
+  const kick = () => { tryPlay(baseVid); tryPlay(topVid); };
+  if (baseVid.readyState >= 2 && topVid.readyState >= 2) kick();
+  else {
+    baseVid.addEventListener('canplay', kick, { once:true });
+    topVid .addEventListener('canplay', kick, { once:true });
+  }
+}
+
+/* Autostart any single video (row 2) */
+function autostartSingle(video){
+  if (!video) return;
+  video.muted = true;                   // required for autoplay
+  video.playsInline = true;             // iOS inline
+  video.setAttribute('playsinline',''); // iOS hint
+  ensureLoop(video);
+  if (video.readyState >= 2) tryPlay(video);
+  else video.addEventListener('canplay', () => tryPlay(video), { once:true });
+}
+
+/* IntersectionObserver: start videos when on screen */
+const io = 'IntersectionObserver' in window ? new IntersectionObserver((entries)=>{
+  entries.forEach(({isIntersecting, target})=>{
+    if (!isIntersecting) return;
+    const cmp = target.matches('.vidcmp');
+    if (cmp){
+      // play both layers
+      const base = target.querySelector('.vid-layer.base video');
+      const top  = target.querySelector('.vid-layer.top  video');
+      tryPlay(base); tryPlay(top);
+    } else {
+      tryPlay(target);                  // single video
+    }
+  });
+}, { root:null, rootMargin:'120px 0px', threshold:0.1 }) : null;
+
+/* Kick on tab refocus (in case browser paused) */
+document.addEventListener('visibilitychange', ()=>{
+  if (document.visibilityState !== 'visible') return;
+  document.querySelectorAll('#videos video').forEach(v => tryPlay(v));
+});
+
+/* ======= BOOT ======= */
+window.addEventListener('DOMContentLoaded', () => {
+  // Initialize every comparison card
+  document.querySelectorAll('#videos .vidcmp').forEach(root => {
+    initVideoSlider(root);
+    // observe both videos for in-view play
+    const base = root.querySelector('.vid-layer.base video');
+    const top  = root.querySelector('.vid-layer.top  video');
+    if (io){ io.observe(base); io.observe(top); }
+  });
+
+  // Initialize every single video
+  document.querySelectorAll('#videos .video-thumb video').forEach(v => {
+    autostartSingle(v);
+    if (io) io.observe(v);
+  });
+});
+
+  /* Make posters from first frames if requested */
+  function autoPoster(video, {time=0.001, quality=0.85} = {}) {
+    const capture = () => {
+      const w = video.videoWidth, h = video.videoHeight;
+      if (!w || !h) return;
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d',{willReadFrequently:true});
+      try{
+        ctx.drawImage(video, 0, 0, w, h);
+        video.setAttribute('poster', canvas.toDataURL('image/jpeg', quality));
+      } catch(e) {}
+    };
+    const doSeekAndGrab = () => {
+      const originalTime = video.currentTime || 0;
+      const onSeeked = () => { video.removeEventListener('seeked', onSeeked); capture(); try{ video.currentTime = originalTime; }catch{} };
+      video.addEventListener('seeked', onSeeked, { once:true });
+      try{ video.currentTime = time; }catch{ capture(); }
+    };
+    if (video.readyState >= 1) doSeekAndGrab();
+    else video.addEventListener('loadedmetadata', doSeekAndGrab, { once:true });
+  }
+  function initAutoPosters(){ document.querySelectorAll('video[data-autoposter]').forEach(v => autoPoster(v)); }
+
+  // Init all comparison blocks + make posters for single videos
+  window.addEventListener('DOMContentLoaded', () => {
+    // init every comparison card
+    document.querySelectorAll('#videos .vidcmp').forEach(initVideoSlider);
+
+    // comparison cards (iterate over every .vidcmp-wrap)
+    document.querySelectorAll('#videos .vidcmp-wrap').forEach(wrap => {
+      const root   = wrap.querySelector('.vidcmp');
+      const base   = root?.querySelector('.vid-layer.base video');
+      const top    = root?.querySelector('.vid-layer.top  video');
+      if (root && base && top) {
+        initVideoSlider(root, wrap);              // slider + sync + play overlay on wrap
+      }
+    });
+
+    // generate first-frame posters for any video with data-autoposter
+    initAutoPosters();
+  });
+  </script>
+</body>
+</html>
